@@ -65,7 +65,7 @@ public class VotingAuthority {
     public void start() {
         createKeyObjectsFromStrings();
 
-        try (ServerSocket serverSocket = new ServerSocket(80)) {
+        try (ServerSocket serverSocket = new ServerSocket(6868)) {
             while(true){
                 Socket client = serverSocket.accept();
                 ClientHandler clientHandler = new ClientHandler(client);
