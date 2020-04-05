@@ -15,6 +15,7 @@ import java.security.spec.KeySpec;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.Map;
 
 public class VotingAuthority {
@@ -46,7 +47,7 @@ public class VotingAuthority {
             "Nmf8GXzGZp1AgGgdAgMBAAE=\n" +
             "-----END PUBLIC KEY-----";
 
-    private static final Map<Integer, String> clientPublicSignatureKeys = Map.ofEntries(
+    private static final Map<Integer, String> clientPublicSignatureKeyStrings = Map.ofEntries(
             Map.entry(12345678,"-----BEGIN PUBLIC KEY-----\n" +
                                     "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCPILUbSbMPnzlEWskxKYPD4rvP\n" +
                                     "k3i+DxtIFiRZrvoKOZG+FWt5LVDcW3+mX2vhQtZgTXB7TJf8xhgniXTQvN7kXFNt\n" +
@@ -55,15 +56,16 @@ public class VotingAuthority {
                                     "-----END PUBLIC KEY-----")
     );
 
+    private Map<Integer, RSAPublicKey> clientPublicSignatureKeys;
+
     // Actual RSA keys
     private RSAPrivateKey ownPrivateBlindingKey;
     private RSAPublicKey ownPublicBlindingKey;
-    private RSAPublicKey clientPublicSignatureKey;
 
     public void start() {
         createKeyObjectsFromStrings();
 
-        try (ServerSocket serverSocket = new ServerSocket(6868)) {
+        try (ServerSocket serverSocket = new ServerSocket(80)) {
             while(true){
                 Socket client = serverSocket.accept();
                 ClientHandler clientHandler = new ClientHandler(client);
@@ -130,31 +132,35 @@ public class VotingAuthority {
         }
 
         // Client public key
-        pkcs8Lines = new StringBuilder();
-        reader = new BufferedReader(new StringReader(clientPublicSignatureKeyString));
-        while (true){
+        clientPublicSignatureKeys = new HashMap<>();
+        for(Map.Entry<Integer, String> entry : clientPublicSignatureKeyStrings.entrySet()){
+            pkcs8Lines = new StringBuilder();
+            reader = new BufferedReader(new StringReader(entry.getValue()));
+            while (true){
+                try {
+                    if ((line = reader.readLine()) == null) break;
+                    pkcs8Lines.append(line);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+
+            pkcs8Pem = pkcs8Lines.toString();
+            pkcs8Pem = pkcs8Pem.replace("-----BEGIN PUBLIC KEY-----", "");
+            pkcs8Pem = pkcs8Pem.replace("-----END PUBLIC KEY-----", "");
+            pkcs8Pem = pkcs8Pem.replaceAll("\\s+","");
+
+            byte[] clientPublicSignatureKeyBytes = Base64.getDecoder().decode(pkcs8Pem);
+            keySpec = new X509EncodedKeySpec(clientPublicSignatureKeyBytes);
             try {
-                if ((line = reader.readLine()) == null) break;
-                pkcs8Lines.append(line);
-            } catch (IOException e) {
+                KeyFactory kf = KeyFactory.getInstance("RSA");
+                Integer i = entry.getKey();
+                RSAPublicKey value = (RSAPublicKey) kf.generatePublic(keySpec);
+                clientPublicSignatureKeys.put(i, value);
+            } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
                 e.printStackTrace();
             }
         }
-
-        pkcs8Pem = pkcs8Lines.toString();
-        pkcs8Pem = pkcs8Pem.replace("-----BEGIN PUBLIC KEY-----", "");
-        pkcs8Pem = pkcs8Pem.replace("-----END PUBLIC KEY-----", "");
-        pkcs8Pem = pkcs8Pem.replaceAll("\\s+","");
-
-        byte[] clientPublicSignatureKeyBytes = Base64.getDecoder().decode(pkcs8Pem);
-        keySpec = new X509EncodedKeySpec(clientPublicSignatureKeyBytes);
-        try {
-            KeyFactory kf = KeyFactory.getInstance("RSA");
-            clientPublicSignatureKey = (RSAPublicKey) kf.generatePublic(keySpec);
-        } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
-            e.printStackTrace();
-        }
-
     }
 
     private static class ClientHandler implements Runnable {
@@ -175,6 +181,10 @@ public class VotingAuthority {
                 String blindedCommitmentString = line.substring(8, 180);
                 String signedBlindedCommitmentString = line.substring(180);
 
+                System.out.println(clientId);
+                System.out.println(blindedCommitmentString);
+                System.out.println(signedBlindedCommitmentString);
+
             } catch (IOException e) {
                 e.printStackTrace();
             } finally {
@@ -188,7 +198,6 @@ public class VotingAuthority {
                     e.printStackTrace();
                 }
             }
-
         }
     }
 }
