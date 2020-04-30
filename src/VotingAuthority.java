@@ -1,3 +1,8 @@
+import org.bouncycastle.crypto.digests.SHA256Digest;
+import org.bouncycastle.crypto.engines.RSAEngine;
+import org.bouncycastle.crypto.params.RSAKeyParameters;
+import org.bouncycastle.crypto.signers.PSSSigner;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -11,15 +16,14 @@ import java.security.spec.InvalidKeySpecException;
 import java.security.spec.KeySpec;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
+
 
 public class VotingAuthority {
 
-    private static final String TAG = "MainActivity";
+    private static int saltLength = 20;
 
+    private static RSAPrivateKey ownPrivateBlindingKey;
     private static final String ownPrivateBlindingKeyString =
             "-----BEGIN PRIVATE KEY-----\n" +
                     "MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGAXyGu/7XPXIwkDpQV\n" +
@@ -37,6 +41,8 @@ public class VotingAuthority {
                     "B5Uz/f6uo1IZR66igOSO16Ig9izkG6iMFx9AVCaV31oi0d39NAmdz2nDir3hrdaT\n" +
                     "NaQE8N+bgzmSfw==\n" +
                     "-----END PRIVATE KEY-----";
+
+    private static RSAPublicKey ownPublicBlindingKey;
     private static final String ownPublicBlindingKeyString =
             "-----BEGIN PUBLIC KEY-----\n" +
                     "MIGeMA0GCSqGSIb3DQEBAQUAA4GMADCBiAKBgF8hrv+1z1yMJA6UFZ5J/uFQ+Xp9\n" +
@@ -45,6 +51,7 @@ public class VotingAuthority {
                     "Nmf8GXzGZp1AgGgdAgMBAAE=\n" +
                     "-----END PUBLIC KEY-----";
 
+    private static HashMap<Integer, RSAPublicKey> clientPublicSignatureKeys;
     private static final Map<Integer, String> clientPublicSignatureKeyStrings = Map.ofEntries(
             Map.entry(12345678,"-----BEGIN PUBLIC KEY-----\n" +
                     "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCPILUbSbMPnzlEWskxKYPD4rvP\n" +
@@ -54,13 +61,7 @@ public class VotingAuthority {
                     "-----END PUBLIC KEY-----")
     );
 
-    private static HashMap<Integer, RSAPublicKey> clientPublicSignatureKeys;
-
     private static ArrayList<Integer> alreadyVoted = new ArrayList<>();
-
-    // Actual RSA keys
-    private static RSAPrivateKey ownPrivateBlindingKey;
-    private static RSAPublicKey ownPublicBlindingKey;
 
     public void start() {
         createKeyObjectsFromStrings();
@@ -174,100 +175,99 @@ public class VotingAuthority {
 
         @Override
         public void run() {
-            PrintWriter out = null;
+            String line = null;
+            InputStreamReader isr = null;
             BufferedReader in = null;
             try {
-                in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+                isr = new InputStreamReader(clientSocket.getInputStream());
+                in = new BufferedReader(isr);
                 System.out.println("Waiting for data...");
-                String line = in.readLine();
-                Integer clientId = Integer.parseInt(line.substring(0, 8));
-                String blindedCommitmentString = line.substring(8, 180);
-                String signedBlindedCommitmentString = line.substring(180);
-
+                line = in.readLine();
                 System.out.println("Received data");
-                System.out.println("Client ID: " + clientId);
-                System.out.println("Blinded commitment: " + blindedCommitmentString);
-                System.out.println("Signature of blinded commitment: " + signedBlindedCommitmentString);
-
-                // Check vote eligibility
-                if(!clientPublicSignatureKeys.containsKey(clientId)) {
-                    System.out.println("Client is NOT eligible to vote.");
-                    return;
+            } catch (IOException ex) {
+                System.err.println("Failed receiving data from client.");
+                ex.printStackTrace();
+            } finally {
+                try {
+                    clientSocket.shutdownInput();
+                } catch (IOException ex) {
+                    System.err.println("Problem while shutting down input stream.");
+                    ex.printStackTrace();
                 }
-                System.out.println("Client is eligible to vote.");
+            }
+            if(line == null){
+                System.out.println("Invalid data received");
+                return;
+            }
 
-                // Check signature
-                RSAPublicKey verificationKey =  clientPublicSignatureKeys.get(clientId);
-                byte[] blindedCommitment = Base64.getDecoder().decode(blindedCommitmentString);
-                byte[] signedBlindedCommitment = Base64.getDecoder().decode(signedBlindedCommitmentString);
-                if(!verifySHA256withRSA(verificationKey, blindedCommitment, signedBlindedCommitment)) {
-                    System.out.println("Signature not valid.");
-                    return;
-                }
-                System.out.println("Signature verified.");
+            Integer clientId = Integer.parseInt(line.substring(0, 8));
+            String blindedCommitmentString = line.substring(8, 180);
+            String signedBlindedCommitmentString = line.substring(180);
 
-                // Check if already voted
-                if(!alreadyVoted.isEmpty())
-                if(alreadyVoted.contains(clientId)){
-                    System.out.println("Voter has already voted before.");
-                    return;
-                }
-                alreadyVoted.add(clientId);
-                System.out.println("Client hasn't voted before.");
+            System.out.println("Client ID: " + clientId);
+            System.out.println("Blinded commitment: " + blindedCommitmentString);
+            System.out.println("Signature of blinded commitment: " + signedBlindedCommitmentString);
 
-                // Sign blinded commitment
-                byte[] authSignedBlindedCommitment = signSHA256withRSA(ownPrivateBlindingKey, blindedCommitment);
-                System.out.println("Blinded commitment signed by authority: " + Base64.getEncoder().encodeToString(authSignedBlindedCommitment));
+            // Check vote eligibility
+            if(!clientPublicSignatureKeys.containsKey(clientId)) {
+                System.out.println("Client is NOT eligible to vote.");
+                return;
+            }
+            System.out.println("Client is eligible to vote.");
 
-                // Send signature back to client
+            // Check signature
+            RSAPublicKey verificationKey =  clientPublicSignatureKeys.get(clientId);
+            byte[] blindedCommitment = Base64.getDecoder().decode(blindedCommitmentString);
+            byte[] signedBlindedCommitment = Base64.getDecoder().decode(signedBlindedCommitmentString);
+            if(!verifySHA256withRSAandPSS(verificationKey, blindedCommitment, signedBlindedCommitment)) {
+                System.out.println("Signature not valid.");
+                return;
+            }
+            System.out.println("Signature verified.");
+
+            // Check if already voted
+            if(!alreadyVoted.isEmpty())
+            if(alreadyVoted.contains(clientId)){
+                System.out.println("Voter has already voted before.");
+                return;
+            }
+            alreadyVoted.add(clientId);
+            System.out.println("Client hasn't voted before.");
+
+            // Sign blinded commitment
+            byte[] authSignedBlindedCommitment = signBlindedRSA(ownPrivateBlindingKey, blindedCommitment);
+            System.out.println("Blinded commitment signed by authority: " + Base64.getEncoder().encodeToString(authSignedBlindedCommitment));
+
+            // Send signature back to client
+            try (PrintWriter out = new PrintWriter(clientSocket.getOutputStream())) {
                 System.out.println("Sending to client...");
-                out = new PrintWriter(clientSocket.getOutputStream());
                 out.println(Base64.getEncoder().encodeToString(authSignedBlindedCommitment));
                 System.out.println("Data sent");
 
-                if(verifySHA256withRSA(ownPublicBlindingKey, blindedCommitment, authSignedBlindedCommitment))
-                    System.out.println("nice");
-
             } catch (IOException e) {
+                System.err.println("Failed sending data to client.");
                 e.printStackTrace();
-            } finally {
-                try {
-                    if (out != null)
-                        out.close();
-                    if (in != null)
-                        in.close();
-                    clientSocket.close();
-                } catch (IOException e){
-                    e.printStackTrace();
-                }
             }
         }
     }
 
-    private static Boolean verifySHA256withRSA(RSAPublicKey verificationKey, byte[] message, byte[] signature){
-        try {
-            Signature sig = Signature.getInstance("SHA256withRSA");
-            sig.initVerify(verificationKey);
-            sig.update(message);
-            return sig.verify(signature);
-        } catch (NoSuchAlgorithmException | InvalidKeyException | SignatureException e) {
-            e.printStackTrace();
-            System.out.println("Signature verification failed.");
-        }
-        return false;
+    private static byte[] signBlindedRSA(RSAPrivateKey signingKey, byte[] message){
+        RSAKeyParameters keyParameters = new RSAKeyParameters(true, signingKey.getModulus(), signingKey.getPrivateExponent());
+
+        RSAEngine signer = new RSAEngine();
+        signer.init(true, keyParameters);
+
+        return signer.processBlock(message, 0, message.length);
     }
 
-    private static byte[] signSHA256withRSA(RSAPrivateKey signingKey, byte[] message) {
-        Signature sig;
-        try {
-            sig = Signature.getInstance("SHA256withRSA");
-            sig.initSign(signingKey);
-            sig.update(message);
-            return sig.sign();
-        } catch (NoSuchAlgorithmException | InvalidKeyException | SignatureException e) {
-            e.printStackTrace();
-            System.out.println("Signing failed.");
-        }
-        return null;
+    private static Boolean verifySHA256withRSAandPSS(RSAPublicKey verificationKey, byte[] message, byte[] signature){
+        RSAKeyParameters keyParameters = new RSAKeyParameters(false, verificationKey.getModulus(), verificationKey.getPublicExponent());
+
+        PSSSigner signer = new PSSSigner(new RSAEngine(), new SHA256Digest(), saltLength);
+        signer.init(false, keyParameters);
+        signer.update(message, 0, message.length);
+
+        return signer.verifySignature(signature);
     }
+
 }
