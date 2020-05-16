@@ -1,3 +1,6 @@
+polls.json
+votes.json
+voters.json
 
 # Created by https://www.gitignore.io/api/java,gradle,intellij
 # Edit at https://www.gitignore.io/?templates=java,gradle,intellij
