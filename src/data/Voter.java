@@ -25,7 +25,11 @@ public class Voter {
     }
 
     public String getPublicSignatureKeyString(){
-        return Base64.getEncoder().encodeToString(this.publicSignatureKey.getEncoded());
+        if (publicSignatureKey.getFormat().equals("X.509")) {
+            return "-----BEGIN PUBLIC KEY-----" + Base64.getEncoder().encodeToString(this.publicSignatureKey.getEncoded()) + "-----END PUBLIC KEY-----";
+        } else {
+            return "-----BEGIN RSA PUBLIC KEY-----" + Base64.getEncoder().encodeToString(this.publicSignatureKey.getEncoded()) + "-----END RSA PUBLIC KEY-----";
+        }
     }
 
     public Integer getId(){

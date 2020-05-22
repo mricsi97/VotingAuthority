@@ -157,7 +157,7 @@ public class VotingAuthority {
         System.out.println("Reading voters file completed successfully.");
     }
 
-    // Reads 'polls' file, then builds 'polls' and'participantLists'
+    // Reads 'polls' file, then builds 'polls' and 'participantLists'
     private void readPollFile(){
         polls = new HashMap<Integer, Poll>();
         participantLists = new HashMap<Integer, VoterMap>();
