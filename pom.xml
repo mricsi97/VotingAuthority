@@ -32,7 +32,7 @@
         <dependency>
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcprov-jdk15on</artifactId>
-            <version>1.65</version>
+            <version>1.66</version>
         </dependency>
 
         <!-- https://mvnrepository.com/artifact/org.bouncycastle/bcpkix-jdk15on -->
@@ -41,6 +41,14 @@
             <artifactId>bcpkix-jdk15on</artifactId>
             <version>1.65</version>
         </dependency>
+
+        <!-- API for Google Sign-In -->
+        <dependency>
+            <groupId>com.google.api-client</groupId>
+            <artifactId>google-api-client</artifactId>
+            <version>1.30.10</version>
+        </dependency>
+
     </dependencies>
 
 </project>

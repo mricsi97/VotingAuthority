@@ -8,9 +8,9 @@ public class Poll {
     private String name;
     private Long expireTime;
     private ArrayList<String> candidates;
-    private ArrayList<Integer> participants;
+    private ArrayList<String> participants;
 
-    public Poll(Integer id, String name, Long expireTime, ArrayList<String> candidates, ArrayList<Integer> participants){
+    public Poll(Integer id, String name, Long expireTime, ArrayList<String> candidates, ArrayList<String> participants){
         this.id = id;
         this.name = name;
         this.expireTime = expireTime;
@@ -30,7 +30,7 @@ public class Poll {
         return this.candidates;
     }
 
-    public ArrayList<Integer> getParticipants(){
+    public ArrayList<String> getParticipants(){
         return this.participants;
     }
 }

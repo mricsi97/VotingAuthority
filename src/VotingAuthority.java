@@ -1,3 +1,7 @@
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
+import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
+import com.google.api.client.json.jackson2.JacksonFactory;
 import data.Poll;
 import data.Vote;
 import data.Voter;
@@ -8,68 +12,37 @@ import javax.json.*;
 import javax.json.stream.JsonGenerator;
 import java.io.*;
 import java.net.*;
+import java.security.GeneralSecurityException;
+import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.security.interfaces.RSAPrivateKey;
-import java.security.interfaces.RSAPublicKey;
 import java.util.*;
 
 public class VotingAuthority {
 
     private static final String AUTHORITY_RESULT_ALREADY_VOTED = "AUTHORITY_RESULT_ALREADY_VOTED";
     private static final String AUTHORITY_RESULT_NOT_ELIGIBLE = "AUTHORITY_RESULT_NOT_ELIGIBLE";
+    private static final String AUTHORITY_RESULT_INVALID_SIGNATURE = "AUTHORITY_RESULT_INVALID_SIGNATURE";
+    private static final String AUTHORITY_RESULT_AUTH_SUCCESS = "AUTHORITY_RESULT_AUTH_SUCCESS";
+    private static final String AUTHORITY_RESULT_AUTH_FAILURE = "AUTHORITY_RESULT_AUTH_FAILURE";
 
-    private static int saltLength = 20;
+    private static int saltLength = 32;
 
-    private static RSAPrivateKey ownPrivateBlindingKey;
-    private static final String ownPrivateBlindingKeyString =
-            "-----BEGIN PRIVATE KEY-----\n" +
-                    "MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGAXyGu/7XPXIwkDpQV\n" +
-                    "nkn+4VD5en2Gr+JPiJtnPZrsmll/tU7eMlpCyIyjC5s6+mbvSuYFRM9l0/1Tu4dp\n" +
-                    "Fc9wv76g0hekb/k1+/WxRIgD3ul8AmJSOpJU1f9VW53jDGz4XpGfVrpAR/c26QMX\n" +
-                    "xhz0E9EkXmg2Z/wZfMZmnUCAaB0CAwEAAQKBgET8BA7iJHCUH0GDGPoj5nQ1Z/Pv\n" +
-                    "OtAoaExDhOYjhheXdwhfHLmewnbzpPgxpN8X7cZ+bqurScgkF6gRVZ6/Qp6kYB0V\n" +
-                    "1Mch2ALdBQIQQvYxF6efHS6F3Ar3y2RlyzPhl6mWgtgMDW9hlMgooUGEhsDJYcFO\n" +
-                    "PFiT0qNCp5ygb9IBAkEAs8UG3GJmk9p10InhdItyDsp1C5vCgDfG9zDUvmsrMmGf\n" +
-                    "Em7CM5NUrAdey08cmnxSj0AtJn/kkwUZcLwf2vJ1vQJBAId4vAJBjrb17RHTroxi\n" +
-                    "/oiGXjjYI1/n61nQjp+a5/2G79uwUZBdHyswASvcWDQDgHF5mz8Yy62f+XebzHPQ\n" +
-                    "8eECQQCWw8+8Np5Ws6mJConVhzlR5EODR884Xw7zsrVJOXHR4ANbnx4pyQ8C829x\n" +
-                    "zNhtS4Sl9SmolyvojSdH385Lfnp1AkAb8F516KdSPG3kG1AIS/JKncuY1ZqWEPKM\n" +
-                    "12JSsFPgCZA2MqrfpxTih0f2j77xGzfGL1pBLQ/0guWkMVF9IT6BAkEApkdiJ7h6\n" +
-                    "B5Uz/f6uo1IZR66igOSO16Ig9izkG6iMFx9AVCaV31oi0d39NAmdz2nDir3hrdaT\n" +
-                    "NaQE8N+bgzmSfw==\n" +
-                    "-----END PRIVATE KEY-----";
-
-    private static RSAPublicKey ownPublicBlindingKey;
-    private static final String ownPublicBlindingKeyString =
-            "-----BEGIN PUBLIC KEY-----\n" +
-                    "MIGeMA0GCSqGSIb3DQEBAQUAA4GMADCBiAKBgF8hrv+1z1yMJA6UFZ5J/uFQ+Xp9\n" +
-                    "hq/iT4ibZz2a7JpZf7VO3jJaQsiMowubOvpm70rmBUTPZdP9U7uHaRXPcL++oNIX\n" +
-                    "pG/5Nfv1sUSIA97pfAJiUjqSVNX/VVud4wxs+F6Rn1a6QEf3NukDF8Yc9BPRJF5o\n" +
-                    "Nmf8GXzGZp1AgGgdAgMBAAE=\n" +
-                    "-----END PUBLIC KEY-----";
+    private static RSAPrivateKey signingKey;
 
     private static HashMap<Integer, Poll> polls = new HashMap<>();
     private static VoterMap voters = new VoterMap();
 
-    private static HashMap<Integer, HashMap<Integer, Vote>> alreadyVotedLists = new HashMap<>();
+    private static HashMap<Integer, HashMap<String, Vote>> alreadyVotedLists = new HashMap<Integer, HashMap<String, Vote>>();
     private static HashMap<Integer, VoterMap> participantLists = new HashMap<>();
 
     private static final SecureRandom random = new SecureRandom();
 
     public void start() {
-        createKeyObjectsFromStrings();
-
+        loadSigningKey();
         readVoterFile();
         readPollFile();
         readVotesFile();
-
-        // TODO: for now register test voters
-        registerVoter(12345678, "-----BEGIN PUBLIC KEY-----\n" +
-                "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCPILUbSbMPnzlEWskxKYPD4rvP\n" +
-                "k3i+DxtIFiRZrvoKOZG+FWt5LVDcW3+mX2vhQtZgTXB7TJf8xhgniXTQvN7kXFNt\n" +
-                "Np+7xD4+XqmcUF8GRGf8/ZN/O1tB4UOpEIZ5wLnk0LqXQR12sZz412WdhAqoWq5g\n" +
-                "41yOFCSAwdnU9PdqXwIDAQAB\n" +
-                "-----END PUBLIC KEY-----");
 
         long lastTime = System.currentTimeMillis();
 
@@ -78,19 +51,11 @@ public class VotingAuthority {
                 // Every 5 minutes save data to disk
                 long currentTime = System.currentTimeMillis();
                 long deltaTime = (currentTime - lastTime) / 1000L;
-                if(deltaTime > 300L){
+                if (deltaTime > 300L) {
                     writeVoterFile();
                     writePollFile();
                     writeVotesFile();
                     lastTime = currentTime;
-                }
-                System.out.println("Polls");
-                for(Integer pollId : polls.keySet()){
-                    System.out.println(pollId.toString());
-                }
-                System.out.println("Voters");
-                for(Integer voterId : voters.keySet()){
-                    System.out.println(voterId.toString());
                 }
 
                 System.out.println("Waiting for client to connect...");
@@ -105,17 +70,31 @@ public class VotingAuthority {
         }
     }
 
-    private void createKeyObjectsFromStrings() {
-        ownPrivateBlindingKey = (RSAPrivateKey) CryptoUtils.createRSAKeyFromString(ownPrivateBlindingKeyString);
-        ownPublicBlindingKey = (RSAPublicKey) CryptoUtils.createRSAKeyFromString(ownPublicBlindingKeyString);
+    private void loadSigningKey() {
+        final File keyFile = new File(System.getProperty("user.dir") + "/authority_private.pem");
+
+        StringBuilder pemBuilder = new StringBuilder();
+        try (FileReader fr = new FileReader(keyFile);
+             BufferedReader br = new BufferedReader(fr)) {
+            String line;
+            while((line = br.readLine()) != null) {
+                pemBuilder.append(line);
+            }
+        } catch (IOException e) {
+            System.err.println("Failed reading signing key file.");
+            e.printStackTrace();
+        }
+
+        String pem = pemBuilder.toString();
+        signingKey = (RSAPrivateKey) CryptoUtils.createRSAKeyFromString(pem);
     }
 
     // Reads 'voters' file, then builds 'voters'
-    private void readVoterFile(){
+    private void readVoterFile() {
         voters = new VoterMap();
 
         File votersFile = new File(System.getProperty("user.dir") + "/voters.json");
-        if(!votersFile.exists()){
+        if (!votersFile.exists()) {
             System.out.println("Voters file doesn't exist.");
             return;
         }
@@ -139,18 +118,18 @@ public class VotingAuthority {
             e.printStackTrace();
         }
 
-        if(voterArray == null){
+        if (voterArray == null) {
             System.out.println("Voters file was empty.");
             return;
         }
 
-        for(JsonValue voterValue : voterArray){
+        for (JsonValue voterValue : voterArray) {
             JsonObject voterObject = voterValue.asJsonObject();
 
-            Integer voterId = voterObject.getInt("id");
-            String publicSignatureKeyString = voterObject.getString("public key");
+            String voterId = voterObject.getString("id");
+            String verificationKeyString = voterObject.getString("verification key");
 
-            Voter voter = new Voter(voterId, publicSignatureKeyString);
+            Voter voter = new Voter(voterId, verificationKeyString);
             voters.put(voterId, voter);
         }
 
@@ -158,12 +137,12 @@ public class VotingAuthority {
     }
 
     // Reads 'polls' file, then builds 'polls' and 'participantLists'
-    private void readPollFile(){
+    private void readPollFile() {
         polls = new HashMap<Integer, Poll>();
         participantLists = new HashMap<Integer, VoterMap>();
 
         File pollsFile = new File(System.getProperty("user.dir") + "/polls.json");
-        if(!pollsFile.exists()){
+        if (!pollsFile.exists()) {
             System.out.println("Polls file doesn't exist.");
             return;
         }
@@ -187,12 +166,12 @@ public class VotingAuthority {
             e.printStackTrace();
         }
 
-        if(pollArray == null){
+        if (pollArray == null) {
             System.out.println("Poll file was empty.");
             return;
         }
 
-        for(JsonValue pollValue : pollArray){
+        for (JsonValue pollValue : pollArray) {
             JsonObject pollObject = pollValue.asJsonObject();
 
             Integer pollId = pollObject.getInt("id");
@@ -201,17 +180,17 @@ public class VotingAuthority {
 
             JsonArray candidateArray = pollObject.getJsonArray("candidates");
             ArrayList<String> candidates = new ArrayList<String>();
-            for(JsonValue candidateValue : candidateArray){
+            for (JsonValue candidateValue : candidateArray) {
                 JsonObject candidateObject = candidateValue.asJsonObject();
                 String candidateName = candidateObject.getString("name");
                 candidates.add(candidateName);
             }
 
             JsonArray participantArray = pollObject.getJsonArray("participants");
-            ArrayList<Integer> participants = new ArrayList<>();
-            for(JsonValue participantValue : participantArray){
+            ArrayList<String> participants = new ArrayList<>();
+            for (JsonValue participantValue : participantArray) {
                 JsonObject participantObject = participantValue.asJsonObject();
-                Integer participantId = participantObject.getInt("id");
+                String participantId = participantObject.getString("id");
                 participants.add(participantId);
             }
 
@@ -226,7 +205,7 @@ public class VotingAuthority {
                 participantLists.put(pollId, participantList);
             }
 
-            for(Integer participantId : participants){
+            for (String participantId : participants) {
                 Voter voter = voters.get(participantId); // TODO: nullt ad vissza
                 participantList.put(voter.getId(), voter);
             }
@@ -236,11 +215,11 @@ public class VotingAuthority {
     }
 
     // Reads 'votes' file, then builds 'alreadyVotedLists'
-    private void readVotesFile(){
-        alreadyVotedLists = new HashMap<Integer, HashMap<Integer, Vote>>();
+    private void readVotesFile() {
+        alreadyVotedLists = new HashMap<Integer, HashMap<String, Vote>>();
 
         File votesFile = new File(System.getProperty("user.dir") + "/votes.json");
-        if(!votesFile.exists()){
+        if (!votesFile.exists()) {
             System.out.println("Votes file doesn't exist.");
             return;
         }
@@ -264,22 +243,22 @@ public class VotingAuthority {
             e.printStackTrace();
         }
 
-        if(voteArray == null){
+        if (voteArray == null) {
             System.out.println("Votes file was empty.");
             return;
         }
 
-        for(JsonValue voteValue : voteArray){
+        for (JsonValue voteValue : voteArray) {
             JsonObject voteObject = voteValue.asJsonObject();
 
             Integer pollId = voteObject.getInt("poll id");
-            Integer voterId = voteObject.getInt("voter id");
+            String voterId = voteObject.getString("voter id");
             String blindedCommitment = voteObject.getString("blinded commitment");
             String signature = voteObject.getString("signature");
 
             Vote vote = new Vote(pollId, voterId, blindedCommitment, signature);
 
-            HashMap<Integer, Vote> alreadyVotedList;
+            HashMap<String, Vote> alreadyVotedList;
             if (alreadyVotedLists.containsKey(pollId)) {
                 alreadyVotedList = alreadyVotedLists.get(pollId);
             } else {
@@ -292,13 +271,13 @@ public class VotingAuthority {
         System.out.println("Reading voters file completed successfully.");
     }
 
-    private void writeVoterFile(){
+    private void writeVoterFile() {
         JsonArrayBuilder voterArrayBuilder = Json.createArrayBuilder();
         JsonObjectBuilder voterBuilder = Json.createObjectBuilder();
 
-        for(Map.Entry<Integer, Voter> voterEntry : voters.entrySet()) {
+        for (Map.Entry<String, Voter> voterEntry : voters.entrySet()) {
             voterBuilder.add("id", voterEntry.getKey());
-            voterBuilder.add("public key", voterEntry.getValue().getPublicSignatureKeyString());
+            voterBuilder.add("verification key", voterEntry.getValue().getVerificationKeyString());
             voterArrayBuilder.add(voterBuilder);
         }
 
@@ -327,7 +306,7 @@ public class VotingAuthority {
         System.out.println("Writing voters file completed successfully.");
     }
 
-    private void writePollFile(){
+    private void writePollFile() {
         JsonArrayBuilder pollArrayBuilder = Json.createArrayBuilder();
         JsonObjectBuilder pollBuilder = Json.createObjectBuilder();
         JsonArrayBuilder candidateArrayBuilder = Json.createArrayBuilder();
@@ -335,18 +314,18 @@ public class VotingAuthority {
         JsonArrayBuilder participantArrayBuilder = Json.createArrayBuilder();
         JsonObjectBuilder participantBuilder = Json.createObjectBuilder();
 
-        for(Map.Entry<Integer, Poll> pollEntry : polls.entrySet()) {
+        for (Map.Entry<Integer, Poll> pollEntry : polls.entrySet()) {
             pollBuilder.add("id", pollEntry.getKey());
             pollBuilder.add("name", pollEntry.getValue().getName());
             pollBuilder.add("expire time", pollEntry.getValue().getExpireTime().toString());
 
-            for(String candidate : pollEntry.getValue().getCandidates()) {
+            for (String candidate : pollEntry.getValue().getCandidates()) {
                 candidateBuilder.add("name", candidate);
                 candidateArrayBuilder.add(candidateBuilder);
             }
             pollBuilder.add("candidates", candidateArrayBuilder);
 
-            for(Integer participant : pollEntry.getValue().getParticipants()){
+            for (String participant : pollEntry.getValue().getParticipants()) {
                 participantBuilder.add("id", participant);
                 participantArrayBuilder.add(participantBuilder);
             }
@@ -380,13 +359,13 @@ public class VotingAuthority {
         System.out.println("Writing polls file completed successfully.");
     }
 
-    private void writeVotesFile(){
+    private void writeVotesFile() {
         JsonArrayBuilder voteArrayBuilder = Json.createArrayBuilder();
         JsonObjectBuilder voteBuilder = Json.createObjectBuilder();
 
-        for(Map.Entry<Integer, HashMap<Integer, Vote>> alreadyVotedEntry : alreadyVotedLists.entrySet()) {
+        for (Map.Entry<Integer, HashMap<String, Vote>> alreadyVotedEntry : alreadyVotedLists.entrySet()) {
             voteBuilder.add("poll id", alreadyVotedEntry.getKey());
-            for(Map.Entry<Integer, Vote> voteEntry : alreadyVotedEntry.getValue().entrySet()){
+            for (Map.Entry<String, Vote> voteEntry : alreadyVotedEntry.getValue().entrySet()) {
                 voteBuilder.add("voter id", voteEntry.getKey());
                 Vote vote = voteEntry.getValue();
                 voteBuilder.add("blinded commitment", Base64.getEncoder().encodeToString(vote.getBlindedCommitment()));
@@ -421,8 +400,8 @@ public class VotingAuthority {
         System.out.println("Writing votes file completed successfully.");
     }
 
-    private void registerVoter(Integer voterId, String publicSignatureKeyString){
-        Voter voter = new Voter(voterId, publicSignatureKeyString);
+    private void registerVoter(String voterId, String verificationKeyString) {
+        Voter voter = new Voter(voterId, verificationKeyString);
         voters.put(voterId, voter);
         writeVoterFile();
     }
@@ -485,17 +464,22 @@ public class VotingAuthority {
                 }
                 case "cast vote": {
                     Integer pollId = Integer.parseInt(linesIter.next());
-                    Integer voterId = Integer.parseInt(linesIter.next());
+                    String idTokenString = linesIter.next();
                     String blindedCommitmentString = linesIter.next();
                     String signatureString = linesIter.next();
 
                     System.out.println("Poll ID: " + pollId);
-                    System.out.println("Client ID: " + voterId);
+                    System.out.println("Client ID token: " + idTokenString);
                     System.out.println("Blinded commitment: " + blindedCommitmentString);
                     System.out.println("Signature of blinded commitment: " + signatureString);
 
-                    handleVoteCast(pollId, voterId, blindedCommitmentString, signatureString);
+                    handleVoteCast(pollId, idTokenString, blindedCommitmentString, signatureString);
                     break;
+                }
+                case "authentication": {
+                    String idTokenString = linesIter.next();
+                    String verificationKeyString = linesIter.next();
+                    handleAuthentication(idTokenString, verificationKeyString);
                 }
             }
         }
@@ -510,8 +494,8 @@ public class VotingAuthority {
 
             // TODO: Everyone is participant on a new poll for now
             List<Voter> voterList = new ArrayList<Voter>(voters.values());
-            ArrayList<Integer> voterIds = new ArrayList<>();
-            for(Voter voter : voterList){
+            ArrayList<String> voterIds = new ArrayList<>();
+            for (Voter voter : voterList) {
                 voterIds.add(voter.getId());
             }
             Poll poll = new Poll(pollId, pollName, expireTime, candidates, voterIds);
@@ -524,7 +508,7 @@ public class VotingAuthority {
         private void sendPollsToClient() {
             try (PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true)) {
                 System.out.println("Sending polls to client...");
-                if(polls.isEmpty()){
+                if (polls.isEmpty()) {
                     out.println("no polls");
                     return;
                 }
@@ -549,7 +533,17 @@ public class VotingAuthority {
             }
         }
 
-        private void handleVoteCast(Integer pollId, Integer voterId, String blindedCommitmentString, String signatureString) {
+        private void handleVoteCast(Integer pollId, String idTokenString, String blindedCommitmentString, String signatureString) {
+            // Check client's ID token for validity
+            GoogleIdToken idToken = verifyIdToken(idTokenString);
+            if (idToken == null) {
+                System.out.println("Client authentication failed.");
+                resultForClient = AUTHORITY_RESULT_AUTH_FAILURE;
+                sendResultToClient();
+                return;
+            }
+            String userId = idToken.getPayload().getSubject();
+
             // Check if poll exists
             if (!polls.containsKey(pollId)) {
                 System.out.println("No poll with the given ID exists.");
@@ -561,7 +555,7 @@ public class VotingAuthority {
             }
 
             // Check vote eligibility
-            if (!participantLists.get(pollId).containsKey(voterId)) {
+            if (!participantLists.get(pollId).containsKey(userId)) {
                 System.out.println("Client is NOT eligible to vote.");
                 resultForClient = AUTHORITY_RESULT_NOT_ELIGIBLE;
                 sendResultToClient();
@@ -570,20 +564,22 @@ public class VotingAuthority {
             System.out.println("Client is eligible to vote.");
 
             // Check signature
-            Voter voter = participantLists.get(pollId).get(voterId);
-            RSAPublicKey verificationKey = voter.getPublicSignatureKey();
+            Voter voter = voters.get(userId);
+            PublicKey verificationKey = voter.getVerificationKey();
             byte[] blindedCommitment = Base64.getDecoder().decode(blindedCommitmentString);
             byte[] signature = Base64.getDecoder().decode(signatureString);
             if (!CryptoUtils.verifySHA256withRSAandPSS(verificationKey, blindedCommitment, signature, saltLength)) {
-                System.out.println("Signature not valid.");
+                System.out.println("Signature NOT valid.");
+                resultForClient = AUTHORITY_RESULT_INVALID_SIGNATURE;
+                sendResultToClient();
                 return;
             }
             System.out.println("Signature verified.");
 
             // Check if already voted
-            HashMap<Integer, Vote> alreadyVotedList;
+            HashMap<String, Vote> alreadyVotedList;
             if (alreadyVotedLists.containsKey(pollId)) {
-                if (alreadyVotedLists.get(pollId).containsKey(voterId)) {
+                if (alreadyVotedLists.get(pollId).containsKey(userId)) {
                     System.out.println("Voter has already voted before.");
                     resultForClient = AUTHORITY_RESULT_ALREADY_VOTED;
                     sendResultToClient();
@@ -595,13 +591,13 @@ public class VotingAuthority {
                 alreadyVotedLists.put(pollId, alreadyVotedList);
             }
             System.out.println("Client hasn't voted before.");
-            Vote vote = new Vote(pollId, voterId, blindedCommitment, signature);
-            alreadyVotedList.put(voterId, vote);
+            Vote vote = new Vote(pollId, userId, blindedCommitment, signature);
+            alreadyVotedList.put(userId, vote);
 
             writeVotesFile();
 
             // Sign blinded commitment
-            byte[] authSignedBlindedCommitment = CryptoUtils.signBlindedRSA(ownPrivateBlindingKey, blindedCommitment);
+            byte[] authSignedBlindedCommitment = CryptoUtils.signBlindedRSA(signingKey, blindedCommitment);
             System.out.println("Blinded commitment signed by authority: " + Base64.getEncoder().encodeToString(authSignedBlindedCommitment));
             resultForClient = Base64.getEncoder().encodeToString(authSignedBlindedCommitment);
             sendResultToClient();
@@ -616,6 +612,37 @@ public class VotingAuthority {
                 System.err.println("Failed sending data to client.");
                 e.printStackTrace();
             }
+        }
+
+        private void handleAuthentication(String idTokenString, String verificationKeyString) {
+            GoogleIdToken idToken = verifyIdToken(idTokenString);
+            if (idToken != null) {
+                GoogleIdToken.Payload payload = idToken.getPayload();
+
+                String userId = payload.getSubject();
+//                if(!voters.containsKey(userId)) {
+                registerVoter(userId, verificationKeyString);
+//                }
+
+                resultForClient = AUTHORITY_RESULT_AUTH_SUCCESS;
+            } else {
+                resultForClient = AUTHORITY_RESULT_AUTH_FAILURE;
+            }
+            sendResultToClient();
+        }
+    }
+
+    private GoogleIdToken verifyIdToken(String idTokenString) {
+        try {
+            GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(
+                    GoogleNetHttpTransport.newTrustedTransport(), new JacksonFactory())
+                    .setAudience(Collections.singletonList("1038869177199-v7tkrec204t60tfjkufdn8ngguqg8ha5.apps.googleusercontent.com"))
+                    .build();
+
+            return verifier.verify(idTokenString);
+        } catch (GeneralSecurityException | IOException e) {
+            e.printStackTrace();
+            return null;
         }
     }
 }

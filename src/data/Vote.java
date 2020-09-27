@@ -4,18 +4,18 @@ import java.util.Base64;
 
 public class Vote {
     private Integer pollId;
-    private Integer voterId;
+    private String voterId;
     private byte[] blindedCommitment;
     private byte[] signature;
 
-    public Vote(Integer pollId, Integer voterId, byte[] blindedCommitment, byte[] signature){
+    public Vote(Integer pollId, String voterId, byte[] blindedCommitment, byte[] signature){
         this.pollId = pollId;
         this.voterId = voterId;
         this.blindedCommitment = blindedCommitment;
         this.signature = signature;
     }
 
-    public Vote(Integer pollId, Integer voterId, String blindedCommitment, String signature){
+    public Vote(Integer pollId, String voterId, String blindedCommitment, String signature){
         this.pollId = pollId;
         this.voterId = voterId;
         this.blindedCommitment = Base64.getDecoder().decode(blindedCommitment);
