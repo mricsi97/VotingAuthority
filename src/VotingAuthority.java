@@ -89,7 +89,7 @@ public class VotingAuthority {
         signingKey = (RSAPrivateKey) CryptoUtils.createRSAKeyFromString(pem);
     }
 
-    // Reads 'voters' file, then builds 'voters'
+    // Reads 'voters.json' file, then builds 'voters'
     private void readVoterFile() {
         voters = new VoterMap();
 
@@ -136,7 +136,7 @@ public class VotingAuthority {
         System.out.println("Reading voters file completed successfully.");
     }
 
-    // Reads 'polls' file, then builds 'polls' and 'participantLists'
+    // Reads 'polls.json' file, then builds 'polls' and 'participantLists'
     private void readPollFile() {
         polls = new HashMap<Integer, Poll>();
         participantLists = new HashMap<Integer, VoterMap>();
@@ -214,7 +214,7 @@ public class VotingAuthority {
         System.out.println("Reading polls file completed successfully.");
     }
 
-    // Reads 'votes' file, then builds 'alreadyVotedLists'
+    // Reads 'votes.json' file, then builds 'alreadyVotedLists'
     private void readVotesFile() {
         alreadyVotedLists = new HashMap<Integer, HashMap<String, Vote>>();
 
@@ -271,6 +271,7 @@ public class VotingAuthority {
         System.out.println("Reading voters file completed successfully.");
     }
 
+    // Writes 'voters.json' file using 'voters'
     private void writeVoterFile() {
         JsonArrayBuilder voterArrayBuilder = Json.createArrayBuilder();
         JsonObjectBuilder voterBuilder = Json.createObjectBuilder();
@@ -306,6 +307,7 @@ public class VotingAuthority {
         System.out.println("Writing voters file completed successfully.");
     }
 
+    // Writes 'polls.json' file using 'polls'
     private void writePollFile() {
         JsonArrayBuilder pollArrayBuilder = Json.createArrayBuilder();
         JsonObjectBuilder pollBuilder = Json.createObjectBuilder();
@@ -359,6 +361,7 @@ public class VotingAuthority {
         System.out.println("Writing polls file completed successfully.");
     }
 
+    // Write 'votes.json' file using 'alreadyVotedLists'
     private void writeVotesFile() {
         JsonArrayBuilder voteArrayBuilder = Json.createArrayBuilder();
         JsonObjectBuilder voteBuilder = Json.createObjectBuilder();
