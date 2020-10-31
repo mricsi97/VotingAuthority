@@ -18,6 +18,8 @@ import java.util.Base64;
 
 public class CryptoUtils {
 
+    private static int saltLength = 32;
+
     public static byte[] signBlindedRSA(RSAPrivateKey signingKey, byte[] message) {
         RSAKeyParameters keyParameters = new RSAKeyParameters(true, signingKey.getModulus(), signingKey.getPrivateExponent());
 
@@ -27,15 +29,11 @@ public class CryptoUtils {
         return signer.processBlock(message, 0, message.length);
     }
 
-    public static Boolean verifySHA256withRSAandPSS(PublicKey verificationKey, byte[] message, byte[] signature, int saltLength) {
+    public static Boolean verifySHA256withRSAandPSS(PublicKey verificationKey, byte[] message, byte[] signature) {
         Boolean result = null;
         try {
             PSSParameterSpec pssParameterSpec = new PSSParameterSpec("SHA-256",
                     "MGF1", MGF1ParameterSpec.SHA256, saltLength, 1);
-
-            for(Provider provider : Security.getProviders()){
-                System.out.println(provider.getName());
-            }
 
             Signature signer = Signature.getInstance("SHA256withRSA/PSS", "BC");
             signer.initVerify(verificationKey);
@@ -59,43 +57,6 @@ public class CryptoUtils {
 //        signer.update(message, 0, message.length);
 //
 //        return signer.verifySignature(signature);
-//    }
-
-//    public static PublicKey createPublicKeyFromString(String pem) {
-//        pem = pem.replace("-----BEGIN PUBLIC KEY-----", "");
-//        pem = pem.replace("-----END PUBLIC KEY-----", "");
-//        pem = pem.replaceAll("\\s+", "");
-//
-//        byte[] keyBytes = Base64.getDecoder().decode(pem);
-//        KeySpec keySpec = new X509EncodedKeySpec(keyBytes);
-//
-//        PublicKey publicKey = null;
-//        try {
-//            KeyFactory kf = KeyFactory.getInstance("RSA");
-//            publicKey = kf.generatePublic(keySpec);
-//        } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
-//            e.printStackTrace();
-//        }
-//        return publicKey;
-//    }
-
-//    public static X509Certificate createCertificateFromString(String pem) {
-//        pem = pem.replace("-----BEGIN PUBLIC KEY-----", "");
-//        pem = pem.replace("-----END PUBLIC KEY-----", "");
-//        pem = pem.replaceAll("\\s+", "");
-//
-//        byte[] certBytes = Base64.getDecoder().decode(pem);
-//
-//        try (ByteArrayInputStream inputStream = new ByteArrayInputStream(certBytes)) {
-//            CertificateFactory factory = CertificateFactory.getInstance("X.509");
-//
-//            return (X509Certificate) factory.generateCertificate(inputStream);
-//        } catch (CertificateException | IOException e) {
-//            System.err.println("Failed creating Certificate from string.");
-//            e.printStackTrace();
-//        }
-//        return null;
-//
 //    }
 
     public static RSAKey createRSAKeyFromString(String key) {
