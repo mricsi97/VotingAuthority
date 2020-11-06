@@ -49,16 +49,6 @@ public class CryptoUtils {
         return result;
     }
 
-//    public static Boolean verifySHA256withRSAandPSS(RSAPublicKey verificationKey, byte[] message, byte[] signature, int saltLength) {
-//        RSAKeyParameters keyParameters = new RSAKeyParameters(false, verificationKey.getModulus(), verificationKey.getPublicExponent());
-//
-//        PSSSigner signer = new PSSSigner(new RSAEngine(), new SHA256Digest(), saltLength);
-//        signer.init(false, keyParameters);
-//        signer.update(message, 0, message.length);
-//
-//        return signer.verifySignature(signature);
-//    }
-
     public static RSAKey createRSAKeyFromString(String key) {
         StringBuilder lines = new StringBuilder();
         BufferedReader reader = new BufferedReader(new StringReader(key));
