@@ -358,8 +358,8 @@ public class VotingAuthority {
         JsonObjectBuilder voteBuilder = Json.createObjectBuilder();
 
         for (Map.Entry<Integer, ConcurrentHashMap<String, Vote>> alreadyVotedEntry : alreadyVotedLists.entrySet()) {
-            voteBuilder.add("poll id", alreadyVotedEntry.getKey());
             for (Map.Entry<String, Vote> voteEntry : alreadyVotedEntry.getValue().entrySet()) {
+                voteBuilder.add("poll id", alreadyVotedEntry.getKey());
                 voteBuilder.add("voter id", voteEntry.getKey());
                 Vote vote = voteEntry.getValue();
                 voteBuilder.add("blinded commitment", Base64.getEncoder().encodeToString(vote.getBlindedCommitment()));
